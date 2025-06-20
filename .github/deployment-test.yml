@@ -1,0 +1,84 @@
+name: Deploy to Test Environment
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'docs/**'
+      - 'docs-site/**'
+      - '*.md'
+      - '*.txt'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository }}-test
+      TEST_SERVER: ${{ secrets.TEST_SERVER }}
+      TEST_USER: ${{ secrets.TEST_USER }}
+      TEST_SSH_KEY: ${{ secrets.TEST_SSH_KEY }}
+      TEST_DEPLOY_PATH: ${{ secrets.TEST_DEPLOY_PATH }}
+      TEST_ENV_FILE: ${{ secrets.TEST_ENV_FILE }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run lint
+        run: npm run lint
+
+      - name: Run tests
+        run: npm run test
+
+      - name: Build project
+        run: npm run build
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Docker image
+        run: |
+          docker build -t $REGISTRY/${{ github.repository }}-test:latest .
+
+      - name: Push Docker image
+        run: |
+          docker push $REGISTRY/${{ github.repository }}-test:latest
+
+      - name: Deploy to Test Server via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ env.TEST_SERVER }}
+          username: ${{ env.TEST_USER }}
+          key: ${{ env.TEST_SSH_KEY }}
+          script: |
+            docker pull $REGISTRY/${{ github.repository }}-test:latest
+            docker stop ev-charging-api-test || true
+            docker rm ev-charging-api-test || true
+            docker run -d --name ev-charging-api-test \
+              --env-file $TEST_ENV_FILE \
+              -p 3002:3000 \
+              -v $TEST_DEPLOY_PATH/logs:/app/logs \
+              $REGISTRY/${{ github.repository }}-test:latest
+            docker image prune -f
+
+      - name: Notify on success
+        if: success()
+        run: echo "✅ Test environment deployed successfully!"
+
+      - name: Notify on failure
+        if: failure()
+        run: echo "❌ Deployment to test environment failed!" 

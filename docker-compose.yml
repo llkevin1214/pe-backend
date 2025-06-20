@@ -1,0 +1,91 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:14-alpine
+    container_name: ev-charging-postgres
+    environment:
+      POSTGRES_DB: ev_charging
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:6-alpine
+    container_name: ev-charging-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # EV Charging API Application
+  api:
+    build: .
+    container_name: ev-charging-api
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: postgres
+      DB_PASSWORD: password
+      DB_NAME: ev_charging
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      LOG_LEVEL: info
+      JWT_SECRET: peSystem
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+
+  # Database Management Tool (Optional)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: ev-charging-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "8080:80"
+    depends_on:
+      - postgres
+    profiles:
+      - tools
+
+  # Redis Management Tool (Optional)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: ev-charging-redis-commander
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      - redis
+    profiles:
+      - tools
+
+volumes:
+  postgres_data:
+  redis_data: 
